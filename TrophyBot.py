@@ -67,10 +67,8 @@ def getScoreboard():
 
     #Build the output string
     message = ""
-    place = 1
-    for player in leaderList:
-        message += f"{place}. {player[0]} {player[1]}\n"
-        place += 1
+    for place, player in enumerate(leaderList):
+        message += f"{place + 1}. {player[0]} {player[1]}\n"
 
     return message
 
