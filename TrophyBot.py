@@ -1,29 +1,18 @@
 #!/usr/bin/env python
 import json
 import discord
-import logging
 import requests
-import time
 
-g_users = {}
-g_token = ""
+g_users = {} #{"username" : "user_id"}
+g_webhookUrl = ""
 g_userAgent = ""
-
-handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
-intents = discord.Intents.default()
-intents.message_content = True
-
-client = discord.Client(intents=intents)
-
-g_nextRequestTime = None
-g_previousScoreboardString = ""
 
 def loadConfig():
     '''
     Load the users and discord auth token from a config file
     '''
     global g_users
-    global g_token
+    global g_webhookUrl
     global g_userAgent
     
     config = {}
@@ -31,7 +20,7 @@ def loadConfig():
        config = json.load(f)
 
     g_users = config["users"]
-    g_token = config["token"]
+    g_webhookUrl = config["webhookUrl"]
     g_userAgent = config["userAgent"]
 
 def getTrophyByUserId( userId ):
@@ -50,64 +39,89 @@ def getTrophyByUserId( userId ):
     else:
         return 0
 
-def getScoreboard():
+def getCurrentScores():
     '''
-    Return a scoreboard string that is sorted by trophy points
+    Return a map of user_ids : trophyScore 
     '''
-
-    trophyPointList = []
-
-    #Get the trophy points for each user
+    currentScoreMap = {}
     for user in g_users.keys():
         points = getTrophyByUserId( g_users[user] )
-        trophyPointList.append((user, points))
+        currentScoreMap[ g_users[user] ] = points
 
-    #Sort the trophy ordering
-    leaderList = sorted( trophyPointList, key=lambda x: x[1], reverse = True )
+    return currentScoreMap
 
-    #Build the output string
+def getPreviousScores():
+    '''
+    Check to see if we have a previous score file and load it up. 
+    '''
+    previousScores = {}
+   
+    try:
+        with open("scores.json", "r") as f:
+            previousScores = json.load(f)
+    except: 
+        pass
+    
+    return previousScores
+
+def saveCurrentScores( currentScores ):
+    '''
+    Write the current scores to a local file. 
+    '''
+
+    with open("scores.json", "w") as f:
+        json.dump( currentScores, f )
+
+    
+def postTrophyScoreboard():
+    '''
+    Post to discord a scoreboard of trophy points along with the delta 
+    from the last time this was run. 
+    '''
+    #Try to get the scores written the last time this was run. 
+    previousScoreMap = getPreviousScores()
+    #Fetch the current scores
+    currentScoreMap = getCurrentScores()
+    #Save the current scores
+    saveCurrentScores( currentScoreMap )
+
+    #Create a sorted list of players, scores and deltas
+    scoreboardList = []
+    for user in g_users.keys():
+        user_id = g_users[user]
+        #If we don't have this user's score don't include them
+        if user_id not in currentScoreMap:
+            continue
+
+        #Calculate the delta from the previous score
+        delta = 0 
+        if user_id in previousScoreMap:
+            delta = currentScoreMap[user_id] - previousScoreMap[user_id]
+            
+        scoreboardList.append((user, currentScoreMap[user_id], delta))
+        
+    #Sort the list by the scores
+    leaderList = sorted( scoreboardList, key=lambda x: x[1], reverse = True )
+
+    #Build up the message string
     message = ""
     place = 1
     for player in leaderList:
-        message += f"{place}. {player[0]} {player[1]}\n"
+        if player[2] != 0:
+            message += f"{place}. {player[0]} {player[1]} +{player[2]}\n"
+        else:
+            message += f"{place}. {player[0]} {player[1]}\n"
         place += 1
 
-    return message
-
-    
-
-@client.event    
-async def on_ready():
-    '''
-    Is called when the bot receives a discord event "ready"
-    '''
-    print(f'Logged on as {client.user}')
-
-@client.event
-async def on_message(message):
-    '''
-    Is called on *every* message sent. 
-    '''
-    global g_nextRequestTime
-    global g_previousScoreboardString
-
-    if message.author == client.user:
-        #Got our own message, ignore it
-        return
-
-    if message.content.startswith('$scoreboard'):
-        scoreboardString = g_previousScoreboardString
-        if g_previousScoreboardString == "" or g_nextRequestTime is None or time.time() > g_nextRequestTime:
-            #Make a request
-            print("Making a request for trophy points")
-            scoreboardString = getScoreboard()
-            #Prevent discord spam from spaming the trackmania.io api
-            g_previousScoreboardString = scoreboardString
-            g_nextRequestTime = time.time() + 300
-
-        await message.channel.send(scoreboardString)
-
+    #Post to discord, print for now.  
+    webhook = discord.SyncWebhook.from_url( g_webhookUrl )
+    webhook.send(message)
 
 if __name__ == '__main__':
+    '''
+    This program is intended to be run on a schedule or as a cron job. 
+    Every time it runs it will post a message to our discord. 
+    '''
     loadConfig()
-    client.run(g_token)
+    postTrophyScoreboard() 
+
