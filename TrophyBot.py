@@ -104,15 +104,16 @@ def postTrophyScoreboard():
     leaderList = sorted( scoreboardList, key=lambda x: x[1], reverse = True )
 
     #Build up the message string
-    message = ""
+    message = "```\n"
     place = 1
     for player in leaderList:
         if player[2] != 0:
-            message += f"{place}. {player[0]} {player[1]} +{player[2]}\n"
+            message += f"{place}. {player[0]:<15} {player[1]:>8} {player[2]:+}\n"
         else:
-            message += f"{place}. {player[0]} {player[1]}\n"
+            message += f"{place}. {player[0]:<15} {player[1]:>8}\n"
         place += 1
 
+    message += "```"
     #Post to discord, print for now.  
     webhook = discord.SyncWebhook.from_url( g_webhookUrl )
     webhook.send(message)
